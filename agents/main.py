@@ -13,9 +13,7 @@ def run_query(question: str, show_full_trace: bool = False, existing_thread_id: 
     print(f"[INFO] thread_id: {thread_id}")
 
     langfuse_handler = get_langfuse_handler(
-    session_id=thread_id,
-    user_id="amit",
-    incident_type="OOMKilled Investigation",
+    session_id=thread_id
 )
 
     config = {
@@ -77,11 +75,15 @@ def run_query(question: str, show_full_trace: bool = False, existing_thread_id: 
 
 if __name__ == "__main__":
     import sys
+    import argparse
 
-    thread_id_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--question", type=str, default="My model server keeps getting OOMKilled. Can you investigate and fix it?")
+    parser.add_argument("--thread-id", type=str, default=None)
+    args = parser.parse_args()
 
     run_query(
-        "My model server keeps getting OOMKilled. Can you investigate and fix it?",
+        question=args.question,
         show_full_trace=True,
-        existing_thread_id=thread_id_arg,
+        existing_thread_id=args.thread_id,
     )
