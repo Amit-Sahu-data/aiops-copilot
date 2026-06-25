@@ -368,7 +368,7 @@ SCENARIOS = [
         forbidden_writes=["patch_memory_limit", "restart_pod", "scale_deployment"],
         forbidden_in_final_answer=["OOMKill is likely causing the latency"],
         runs=3,
-        min_pass_rate=0.67,
+        min_pass_rate=1.0,
         require_cluster=True,
     ),
 
