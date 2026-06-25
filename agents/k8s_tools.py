@@ -10,21 +10,24 @@ _doc_client = chromadb.PersistentClient(path=os.path.join(os.path.dirname(__file
 _embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
 _doc_collection = _doc_client.get_collection("runbooks", embedding_function=_embedding_fn)
 
-
-# Load kubeconfig into a Configuration object we control directly
-
 try:
     config.load_kube_config()
     v1 = client.CoreV1Api()
     apps_v1 = client.AppsV1Api()
 except Exception:
-    # Running in CI or environment without a Kubernetes cluster
-    # Tools will fail gracefully at call time if invoked
     v1 = None
     apps_v1 = None
 
 API_TIMEOUT_SECONDS = 10
 
+
+def _is_transient_api_error(exception):
+    if isinstance(exception, ApiException):
+        return exception.status in (429, 500, 502, 503, 504)
+    return False
+
+
+# ── READ TOOLS ────────────────────────────────────────────────────────────────
 
 @retry(
     stop=stop_after_attempt(3),
@@ -34,7 +37,7 @@ API_TIMEOUT_SECONDS = 10
 def _list_pods_with_retry(namespace):
     if v1 is None:
         raise RuntimeError("No Kubernetes cluster available in this environment")
-    return v1.list_namespaced_pod(namespace=namespace)
+    return v1.list_namespaced_pod(namespace=namespace, _request_timeout=API_TIMEOUT_SECONDS)
 
 
 @tool
@@ -69,7 +72,7 @@ def get_pod_status(namespace: str = "default") -> str:
 def _list_pods_for_limits_with_retry(namespace):
     if v1 is None:
         raise RuntimeError("No Kubernetes cluster available in this environment")
-    return v1.list_namespaced_pod(namespace=namespace)
+    return v1.list_namespaced_pod(namespace=namespace, _request_timeout=API_TIMEOUT_SECONDS)
 
 
 @tool
@@ -78,8 +81,7 @@ def get_pod_resource_limits(namespace: str = "default") -> str:
     try:
         pods = _list_pods_for_limits_with_retry(namespace)
     except (ApiException, RuntimeError) as e:
-        return f"Failed to fetch pod status: {str(e)}"
-
+        return f"Failed to fetch resource limits: {str(e)}"
     results = []
     for pod in pods.items:
         name = pod.metadata.name
@@ -99,9 +101,9 @@ def get_pod_resource_limits(namespace: str = "default") -> str:
     retry=retry_if_exception_type(ApiException),
 )
 def _list_deployments_with_retry(namespace):
-    if v1 is None:
+    if apps_v1 is None:
         raise RuntimeError("No Kubernetes cluster available in this environment")
-    return v1.list_namespaced_pod(namespace=namespace)
+    return apps_v1.list_namespaced_deployment(namespace=namespace, _request_timeout=API_TIMEOUT_SECONDS)
 
 
 @tool
@@ -110,8 +112,7 @@ def get_deployment_info(namespace: str = "default") -> str:
     try:
         deployments = _list_deployments_with_retry(namespace)
     except (ApiException, RuntimeError) as e:
-        return f"Failed to fetch pod status: {str(e)}"
-
+        return f"Failed to fetch deployment info: {str(e)}"
     results = []
     for d in deployments.items:
         name = d.metadata.name
@@ -125,12 +126,6 @@ def get_deployment_info(namespace: str = "default") -> str:
     return "\n".join(results) if results else "No deployments found."
 
 
-def _is_transient_api_error(exception):
-    if isinstance(exception, ApiException):
-        return exception.status in (429, 500, 502, 503, 504)
-    return False
-
-
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -140,8 +135,12 @@ def _read_pod_log_with_retry(pod_name, namespace, tail_lines, previous):
     if v1 is None:
         raise RuntimeError("No Kubernetes cluster available in this environment")
     return v1.read_namespaced_pod_log(
-        name=pod_name, namespace=namespace,
-        tail_lines=tail_lines, timestamps=True, previous=previous,
+        name=pod_name,
+        namespace=namespace,
+        tail_lines=tail_lines,
+        timestamps=True,
+        previous=previous,
+        _request_timeout=API_TIMEOUT_SECONDS,
     )
 
 
@@ -155,8 +154,16 @@ def get_pod_logs(pod_name: str, namespace: str = "default", tail_lines: int = 50
         logs = _read_pod_log_with_retry(pod_name, namespace, tail_lines, previous)
         return logs if logs.strip() else "No log output found for this pod."
     except (ApiException, RuntimeError) as e:
-        return f"Failed to fetch pod status: {str(e)}"
-    
+        if isinstance(e, ApiException) and e.status == 400 and previous:
+            return (
+                f"No previous container logs available for {pod_name} — this pod likely hasn't "
+                f"restarted, or the previous container's logs have been garbage collected."
+            )
+        return f"Error fetching logs: {str(e)}"
+
+
+# ── WRITE TOOLS ───────────────────────────────────────────────────────────────
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -165,7 +172,11 @@ def get_pod_logs(pod_name: str, namespace: str = "default", tail_lines: int = 50
 def _delete_pod_with_retry(pod_name, namespace):
     if v1 is None:
         raise RuntimeError("No Kubernetes cluster available in this environment")
-    return v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
+    return v1.delete_namespaced_pod(
+        name=pod_name,
+        namespace=namespace,
+        _request_timeout=API_TIMEOUT_SECONDS,
+    )
 
 
 @tool
@@ -176,10 +187,10 @@ def restart_pod(pod_name: str, namespace: str = "default") -> str:
     try:
         _delete_pod_with_retry(pod_name, namespace)
         return f"Pod {pod_name} deleted successfully. The Deployment controller will recreate it shortly."
-    except ApiException as e:
-        if e.status == 404:
+    except (ApiException, RuntimeError) as e:
+        if isinstance(e, ApiException) and e.status == 404:
             return f"Pod {pod_name} was already gone (404) — it may have already restarted or been deleted."
-        return f"Error restarting pod after retries: {e.reason} (status {e.status})"
+        return f"Error restarting pod: {str(e)}"
 
 
 @retry(
@@ -191,7 +202,11 @@ def _patch_deployment_with_retry(deployment_name, namespace, body):
     if apps_v1 is None:
         raise RuntimeError("No Kubernetes cluster available in this environment")
     return apps_v1.patch_namespaced_deployment(
-        name=deployment_name, namespace=namespace, body=body
+        name=deployment_name,
+        namespace=namespace,
+        body=body,
+        _request_timeout=API_TIMEOUT_SECONDS,
+    )
 
 
 @tool
@@ -200,16 +215,21 @@ def patch_memory_limit(deployment_name: str, new_limit_mi: int, namespace: str =
     repeatedly OOMKilled and the current memory limit appears insufficient for the workload.
     This is a WRITE operation that requires human approval before execution."""
     try:
-        deployment = apps_v1.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+        if apps_v1 is None:
+            return "Kubernetes client not available — cannot patch deployment."
+        deployment = apps_v1.read_namespaced_deployment(
+            name=deployment_name,
+            namespace=namespace,
+            _request_timeout=API_TIMEOUT_SECONDS,
+        )
         container = deployment.spec.template.spec.containers[0]
         if container.resources.limits is None:
             container.resources.limits = {}
         container.resources.limits["memory"] = f"{new_limit_mi}Mi"
-
         _patch_deployment_with_retry(deployment_name, namespace, deployment)
         return f"Deployment {deployment_name} memory limit patched to {new_limit_mi}Mi. Pods will roll out with the new limit."
-    except ApiException as e:
-        return f"Error patching deployment after retries: {e.reason} (status {e.status})"
+    except (ApiException, RuntimeError) as e:
+        return f"Error patching deployment: {str(e)}"
 
 
 @retry(
@@ -221,8 +241,10 @@ def _patch_scale_with_retry(deployment_name, namespace, replicas):
     if apps_v1 is None:
         raise RuntimeError("No Kubernetes cluster available in this environment")
     return apps_v1.patch_namespaced_deployment_scale(
-        name=deployment_name, namespace=namespace,
-        body={"spec": {"replicas": replicas}}
+        name=deployment_name,
+        namespace=namespace,
+        body={"spec": {"replicas": replicas}},
+        _request_timeout=API_TIMEOUT_SECONDS,
     )
 
 
@@ -233,9 +255,12 @@ def scale_deployment(deployment_name: str, replicas: int, namespace: str = "defa
     try:
         _patch_scale_with_retry(deployment_name, namespace, replicas)
         return f"Deployment {deployment_name} scaled to {replicas} replicas."
-    except ApiException as e:
-        return f"Error scaling deployment after retries: {e.reason} (status {e.status})"
-    
+    except (ApiException, RuntimeError) as e:
+        return f"Error scaling deployment: {str(e)}"
+
+
+# ── RAG TOOL ──────────────────────────────────────────────────────────────────
+
 @tool
 def search_runbooks(query: str, n_results: int = 2) -> str:
     """Search internal runbooks and past incident postmortems for relevant guidance.
