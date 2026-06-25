@@ -32,7 +32,9 @@ API_TIMEOUT_SECONDS = 10
     retry=retry_if_exception_type(ApiException),
 )
 def _list_pods_with_retry(namespace):
-    return v1.list_namespaced_pod(namespace=namespace, _request_timeout=API_TIMEOUT_SECONDS)
+    if v1 is None:
+        raise RuntimeError("Kubernetes client not initialized — no cluster available")
+    return v1.list_namespaced_pod(namespace=namespace)
 
 
 @tool
@@ -40,9 +42,8 @@ def get_pod_status(namespace: str = "default") -> str:
     """Get the status of all pods in a given namespace, including restart counts and ready state."""
     try:
         pods = _list_pods_with_retry(namespace)
-    except ApiException as e:
-        return f"Failed to fetch pod status after retries: {e.reason} (status {e.status})"
-
+    except (ApiException, RuntimeError) as e:
+        return f"Failed to fetch pod status: {str(e)}"
     results = []
     for pod in pods.items:
         name = pod.metadata.name
