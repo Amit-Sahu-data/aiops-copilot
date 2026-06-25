@@ -1,0 +1,16 @@
+POSTMORTEM: Failed Deployment Rollout, May 2026
+
+SUMMARY:
+A new image version was deployed and immediately caused elevated error rates on the /predict
+endpoint. Root cause was a missing environment variable in the new image that caused the model
+loading step to silently fall back to a default (untrained) model. Pod health checks did not
+catch this because /health only checked process liveness, not model load success.
+
+RESOLUTION:
+Rolled back to the previous image version. Added a more thorough readiness check that validates
+model load success, not just process liveness.
+
+LESSON LEARNED:
+Health/readiness checks must validate actual application readiness (e.g., model loaded and
+returning sane outputs), not just "the process is running." This incident was unrelated to
+memory or resource limits — a reminder that not every incident is a capacity problem.

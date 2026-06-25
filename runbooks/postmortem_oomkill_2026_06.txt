@@ -1,0 +1,17 @@
+POSTMORTEM: dummy-model-server OOMKill Incidents, June 2026
+
+SUMMARY:
+The dummy-model-server deployment experienced repeated OOMKill events. Root cause was a memory
+leak simulated via the /leak test endpoint, where allocated memory was never released between
+requests. Memory climbed steadily (~10MB per call) until exceeding the configured 150Mi limit,
+at which point the kernel OOM killer terminated the container (Exit Code 137).
+
+RESOLUTION:
+Memory limit was increased from 150Mi to 300Mi as a short-term mitigation via patch_memory_limit,
+approved by the on-call operator after Root Cause Analysis confirmed a clear evidence chain
+(escalating WARNING and ERROR log entries directly preceding each restart).
+
+LESSON LEARNED:
+Increasing the memory limit treats the symptom, not the underlying leak. For a real production
+service, this would require a follow-up engineering task to fix the leak at the code level.
+A limit increase without a corresponding leak fix will eventually recur as load increases.

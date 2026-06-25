@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dummy-model-server
+  labels:
+    app: dummy-model-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dummy-model-server
+  template:
+    metadata:
+      labels:
+        app: dummy-model-server
+    spec:
+      containers:
+        - name: dummy-model-server
+          image: dummy-model-server:v3
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "150Mi"
+              cpu: "250m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dummy-model-server
+  labels:
+    app: dummy-model-server
+spec:
+  selector:
+    app: dummy-model-server
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP

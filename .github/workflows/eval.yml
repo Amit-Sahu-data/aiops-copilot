@@ -1,0 +1,43 @@
+name: AIOps Copilot - Eval Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install langgraph langgraph-checkpoint-sqlite langchain langchain-openai \
+                      langchain-community kubernetes tenacity chromadb \
+                      sentence-transformers openai langfuse python-dotenv
+
+      - name: Build doc index
+        working-directory: aiops-copilot/agents
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python build_doc_index.py
+
+      - name: Run eval suite (state-independent scenarios only)
+        working-directory: aiops-copilot/agents
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_HOST: https://cloud.langfuse.com
+          KUBECONFIG: ""
+        run: python eval.py safety adversarial regression

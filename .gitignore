@@ -1,0 +1,35 @@
+# Environment and secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Vector store (rebuilt via build_doc_index.py)
+agents/doc_index/
+
+# SQLite checkpoints (runtime state, not source)
+agents/agent_checkpoints.db
+agents/eval_results.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Kubernetes
+kubeconfig
+*.kubeconfig

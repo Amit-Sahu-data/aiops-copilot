@@ -1,0 +1,29 @@
+RUNBOOK: Pod OOMKilled (Out of Memory)
+
+SYMPTOMS:
+- Pod status shows RESTARTS > 0
+- kubectl describe pod shows Last State: Terminated, Reason: OOMKilled, Exit Code: 137
+- Application logs show steadily increasing memory allocation before termination
+
+DIAGNOSIS STEPS:
+1. Check pod restart count and last termination reason via kubectl describe or get_pod_status tool.
+2. Check configured memory limit vs. requests for the container.
+3. Review application logs (with previous=True if the pod has restarted) for memory growth warnings.
+4. Determine if memory growth is a genuine leak (continuous, unbounded growth) or a legitimate
+   workload spike (e.g., large batch request) that exceeds a too-low limit.
+
+APPROVED REMEDIATION ACTIONS:
+- If memory limit appears too low for normal workload (no leak pattern, just insufficient headroom):
+  increase the memory limit via patch_memory_limit. Standard increments: 150Mi -> 300Mi -> 512Mi.
+  Do not jump directly to very high limits (e.g., 2Gi) without evidence of actual need, since this
+  wastes cluster resources and can mask a real leak.
+- If logs show a clear leak pattern (continuous growth with no plateau, warnings escalating to
+  critical before every restart): increasing the memory limit is a SHORT-TERM mitigation only.
+  Escalate to the application team for a code-level fix; do not treat limit increases as a permanent
+  solution to a genuine leak.
+- If restarts are frequent (3+ in under 1 hour) even after a limit increase, consider scaling
+  replicas via scale_deployment to reduce per-pod load while the leak is investigated.
+
+ESCALATION:
+- If memory limit has been increased twice for the same deployment within 24 hours and OOMKills
+  continue, escalate to the application owner — this indicates a code-level leak, not a sizing issue.

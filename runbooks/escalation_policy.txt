@@ -1,0 +1,14 @@
+ESCALATION POLICY
+
+SEVERITY LEVELS:
+- SEV1: Full outage or data loss risk. Page on-call immediately, no automated remediation without
+  explicit human approval at every step.
+- SEV2: Degraded service (latency, partial errors, repeated restarts). Automated investigation and
+  remediation proposals are allowed, but all write actions require human approval before execution.
+- SEV3: Minor or isolated issue with no immediate user impact. Investigate and document; remediation
+  can wait for normal business hours review.
+
+GENERAL RULE:
+No automated system in this environment is permitted to execute a write action (pod restart,
+resource limit change, scaling) without explicit human approval, regardless of severity. This
+applies even when the root cause is well-established and the fix seems obvious.

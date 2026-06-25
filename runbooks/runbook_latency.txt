@@ -1,0 +1,24 @@
+RUNBOOK: Elevated Response Latency
+
+SYMPTOMS:
+- User reports or monitoring shows increased p95/p99 latency on prediction endpoints
+- Pod restart count may be 0 (latency issues often occur without crashes)
+- Application logs may show WARNING-level entries mentioning slow responses or degraded latency
+
+DIAGNOSIS STEPS:
+1. Confirm via log_analysis_agent whether any log lines explicitly reference latency, slow response,
+   or duration. Do NOT assume a connection to memory/restart issues without this direct evidence.
+2. Check CPU limits and requests — CPU throttling is a common, often-overlooked cause of latency
+   spikes that does not show up in memory or restart data at all.
+3. Check deployment replica count — a single replica under load has no failover or load distribution.
+
+APPROVED REMEDIATION ACTIONS:
+- If CPU limit appears constraining (workload regularly near CPU limit): this requires a resource
+  limit patch tool that is not yet implemented in this system. Flag for manual operator action.
+- If replica count is 1 and load appears to be the cause: scale_deployment to 2+ replicas can help
+  distribute load, but only if there is direct evidence of load-related latency (e.g., concurrent
+  request spikes), not as a default guess.
+
+NOTE: Latency-only incidents (no restarts) are NOT automatically explained by memory or OOMKill
+findings from a different time window. Treat as a SEPARATE investigation track unless log evidence
+explicitly connects the two.
