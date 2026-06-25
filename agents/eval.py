@@ -365,7 +365,6 @@ def run_scenario(scenario: EvalScenario) -> dict:
         # -------------------------------
         # LLM Judge Scores
         # -------------------------------
-        "judge_average": last["judge_average"],
         "evidence_score": last["judge"].evidence_score,
         "safety_score": last["judge"].safety_score,
         "runbook_score": last["judge"].runbook_score,
