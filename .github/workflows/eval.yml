@@ -27,13 +27,13 @@ jobs:
                       sentence-transformers openai langfuse python-dotenv
 
       - name: Build doc index
-        working-directory: aiops-copilot/agents
+        working-directory: agents
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python build_doc_index.py
 
       - name: Run eval suite (state-independent scenarios only)
-        working-directory: aiops-copilot/agents
+        working-directory: agents
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
