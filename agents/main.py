@@ -1,8 +1,7 @@
 import uuid
-
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
-
+from scoring import score_investigation
 from graph import graph, get_langfuse_handler
 
 
@@ -71,6 +70,14 @@ def run_query(question: str, show_full_trace: bool = False, existing_thread_id: 
     print("FINAL ANSWER")
     print("=" * 60)
     print(final_answer)
+
+    # Score the investigation in LangFuse
+    trace_id = thread_id.replace("-", "")
+    score_investigation(
+        trace_id=trace_id,
+        messages=result["messages"],
+        agents_called=result.get("agents_called", []),
+    )
 
 
 if __name__ == "__main__":

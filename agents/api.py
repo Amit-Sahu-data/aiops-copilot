@@ -7,7 +7,8 @@ Endpoints:
     GET  /status/{thread_id} - Check investigation status
     POST /approve/{thread_id} - Approve or deny a pending remediation
 """
-import langfuse as langfuse_sdk
+
+from scoring import score_investigation
 import uuid
 import asyncio
 from typing import Optional
@@ -95,6 +96,15 @@ def run_investigation(thread_id: str, question: str, resume: bool = False, decis
             messages = result["messages"]
             ai_messages = [m for m in messages if isinstance(m, AIMessage) and m.content]
             final_answer = ai_messages[-1].content if ai_messages else "No answer produced."
+
+            # Score the investigation in LangFuse
+            trace_id = thread_id.replace("-", "")
+            score_investigation(
+                trace_id=trace_id,
+                messages=messages,
+                agents_called=result.get("agents_called", []),
+            )
+
             investigations[thread_id]["status"] = "completed"
             investigations[thread_id]["final_answer"] = final_answer
             investigations[thread_id]["agents_called"] = result.get("agents_called", [])
