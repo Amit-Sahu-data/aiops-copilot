@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: aiops-copilot-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring  # must match your kube-prometheus-stack release label
+spec:
+  groups:
+    - name: aiops-copilot
+      interval: 30s
+      rules:
+        - alert: PodOOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled", namespace="default"} == 1
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod OOMKilled: {{ $labels.pod }}"
+            description: "Pod {{ $labels.pod }} was OOMKilled in namespace {{ $labels.namespace }}"

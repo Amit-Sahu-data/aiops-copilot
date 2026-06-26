@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: aiops-copilot-webhook
+  namespace: monitoring
+spec:
+  route:
+    receiver: aiops-copilot
+    matchers:
+      - name: alertname
+        value: PodOOMKilled
+  receivers:
+    - name: aiops-copilot
+      webhookConfigs:
+        - url: "http://host.minikube.internal:8080/webhook/alertmanager"
+          sendResolved: false

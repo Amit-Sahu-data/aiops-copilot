@@ -215,3 +215,51 @@ def list_investigations():
             for tid, inv in investigations.items()
         ]
     }
+
+@app.post("/webhook/alertmanager")
+async def alertmanager_webhook(payload: dict, background_tasks: BackgroundTasks):
+    """
+    Receives Prometheus AlertManager webhooks and automatically triggers investigations.
+    AlertManager calls this endpoint when a configured alert fires.
+    """
+    firing_alerts = [a for a in payload.get("alerts", []) if a["status"] == "firing"]
+
+    if not firing_alerts:
+        return {"status": "received", "alerts_processed": 0, "message": "No firing alerts"}
+
+    triggered = []
+    for alert in firing_alerts:
+        alert_name = alert["labels"].get("alertname", "Unknown alert")
+        pod = alert["labels"].get("pod", alert["labels"].get("container", "unknown pod"))
+        namespace = alert["labels"].get("namespace", "default")
+
+        question = (
+            f"Prometheus alert '{alert_name}' fired for pod '{pod}' "
+            f"in namespace '{namespace}'. Please investigate and fix it."
+        )
+
+        thread_id = str(uuid.uuid4())
+        investigations[thread_id] = {
+            "status": "running",
+            "question": question,
+            "final_answer": None,
+            "pending_action": None,
+            "agents_called": [],
+            "error": None,
+            "source": "alertmanager",
+            "alert_name": alert_name,
+        }
+
+        background_tasks.add_task(
+            run_investigation,
+            thread_id=thread_id,
+            question=question,
+            resume=False,
+        )
+        triggered.append({"thread_id": thread_id, "alert": alert_name, "pod": pod})
+
+    return {
+        "status": "received",
+        "alerts_processed": len(triggered),
+        "investigations": triggered,
+    }
