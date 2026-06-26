@@ -10,8 +10,6 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.types import interrupt
-from langgraph.checkpoint.sqlite import SqliteSaver
-import sqlite3
 
 from k8s_tools import (
     get_pod_status, get_pod_resource_limits, get_deployment_info, get_pod_logs,
@@ -376,8 +374,22 @@ graph_builder.add_conditional_edges(
 graph_builder.add_edge("remediation_tools", "remediation_agent")
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "agent_checkpoints.db")
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-checkpointer = SqliteSaver(conn)
+POSTGRES_URL = os.getenv("POSTGRES_URL")
+SQLITE_PATH = os.path.join(os.path.dirname(__file__), "agent_checkpoints.db")
+
+if POSTGRES_URL:
+    import psycopg
+    from langgraph.checkpoint.postgres import PostgresSaver
+    postgres_conn = psycopg.connect(POSTGRES_URL, autocommit=True)
+    checkpointer = PostgresSaver(postgres_conn)
+    checkpointer.setup()
+    print("[INFO] Using Postgres checkpointer")
+
+else:
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    import sqlite3
+    conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
+    print("[INFO] Using SQLite checkpointer (fallback)")
 
 graph = graph_builder.compile(checkpointer=checkpointer)
