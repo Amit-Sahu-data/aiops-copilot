@@ -18,7 +18,37 @@ from k8s_tools import (
 
 load_dotenv()
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, timeout=30, max_retries=2)
+import os
+from langchain_openai import ChatOpenAI
+
+def create_llm_with_fallback():
+    """
+    Creates the primary LLM with an automatic fallback chain.
+    Primary: gpt-4o-mini (fast, cheap)
+    Fallback: gpt-3.5-turbo (if gpt-4o-mini is unavailable)
+    """
+    primary = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0,
+        timeout=30,
+        max_retries=2,
+    )
+
+    fallback = ChatOpenAI(
+        model="gpt-3.5-turbo",
+        temperature=0,
+        timeout=30,
+        max_retries=2,
+    )
+
+    # LangChain's .with_fallbacks() automatically switches to fallback
+    # if the primary raises an exception (rate limit, model unavailable, etc.)
+    return primary.with_fallbacks(
+        [fallback],
+        exceptions_to_handle=(Exception,),
+    )
+
+llm = create_llm_with_fallback()
 
 import os
 from langfuse.langchain import CallbackHandler
