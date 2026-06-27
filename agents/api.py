@@ -3,20 +3,26 @@ AIOps Copilot - REST API
 Wraps the LangGraph agent as a FastAPI service.
 
 Endpoints:
-    POST /investigate        - Start a new investigation
-    GET  /status/{thread_id} - Check investigation status
-    POST /approve/{thread_id} - Approve or deny a pending remediation
+    POST /investigate              - Start a new investigation
+    GET  /status/{thread_id}       - Check investigation status
+    POST /approve/{thread_id}      - Approve or deny a pending remediation
+    GET  /investigations           - List all investigations
+    POST /webhook/alertmanager     - Receive Prometheus AlertManager webhooks
 """
 
-from scoring import score_investigation
 import uuid
-import asyncio
 from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.types import Command
 from graph import graph, get_langfuse_handler
+from scoring import score_investigation
+from slack_notifier import (
+    send_investigation_started,
+    send_approval_request,
+    send_investigation_complete,
+)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -40,12 +46,12 @@ investigations = {}  # thread_id -> investigation state
 
 class InvestigateRequest(BaseModel):
     question: str
-    thread_id: Optional[str] = None  # provide to resume an existing investigation
+    thread_id: Optional[str] = None
 
 
 class InvestigateResponse(BaseModel):
     thread_id: str
-    status: str  # "running" | "awaiting_approval" | "completed" | "failed"
+    status: str
     message: str
 
 
@@ -58,7 +64,7 @@ class StatusResponse(BaseModel):
     status: str
     question: str
     final_answer: Optional[str] = None
-    pending_action: Optional[str] = None  # what action is awaiting approval
+    pending_action: Optional[str] = None
     agents_called: list[str] = []
     error: Optional[str] = None
 
@@ -90,34 +96,49 @@ def run_investigation(thread_id: str, question: str, resume: bool = False, decis
 
         if "__interrupt__" in result:
             interrupt_info = result["__interrupt__"][0].value
+            pending_action = interrupt_info.get("message", "Approval required")
             investigations[thread_id]["status"] = "awaiting_approval"
-            investigations[thread_id]["pending_action"] = interrupt_info.get("message", "Approval required")
+            investigations[thread_id]["pending_action"] = pending_action
+
+            # Notify Slack — approval required
+            send_approval_request(
+                thread_id=thread_id,
+                question=investigations[thread_id]["question"],
+                proposed_action=pending_action,
+                api_base_url="http://localhost:8088",
+            )
+
         else:
             messages = result["messages"]
             ai_messages = [m for m in messages if isinstance(m, AIMessage) and m.content]
             final_answer = ai_messages[-1].content if ai_messages else "No answer produced."
+            agents_called = result.get("agents_called", [])
 
             # Score the investigation in LangFuse
             trace_id = thread_id.replace("-", "")
             score_investigation(
                 trace_id=trace_id,
                 messages=messages,
-                agents_called=result.get("agents_called", []),
+                agents_called=agents_called,
             )
 
             investigations[thread_id]["status"] = "completed"
             investigations[thread_id]["final_answer"] = final_answer
-            investigations[thread_id]["agents_called"] = result.get("agents_called", [])
+            investigations[thread_id]["agents_called"] = agents_called
 
-        
+            # Notify Slack — investigation complete
+            send_investigation_complete(
+                thread_id=thread_id,
+                question=investigations[thread_id]["question"],
+                final_answer=final_answer,
+                agents_called=agents_called,
+            )
 
     except Exception as e:
-    # Only mark as failed if investigation didn't already complete
         if investigations[thread_id]["status"] == "running":
             investigations[thread_id]["status"] = "failed"
             investigations[thread_id]["error"] = str(e)
         else:
-            # Investigation completed but cleanup failed — not a real failure
             investigations[thread_id]["error"] = f"Cleanup warning: {str(e)}"
 
 
@@ -144,6 +165,12 @@ async def investigate(request: InvestigateRequest, background_tasks: BackgroundT
         "agents_called": [],
         "error": None,
     }
+    print(f"[DEBUG] About to call send_investigation_started for {thread_id}")
+    send_investigation_started(thread_id, request.question)
+    print(f"[DEBUG] send_investigation_started returned")
+
+    # Notify Slack — investigation started
+    send_investigation_started(thread_id, request.question)
 
     background_tasks.add_task(
         run_investigation,
@@ -226,6 +253,7 @@ def list_investigations():
         ]
     }
 
+
 @app.post("/webhook/alertmanager")
 async def alertmanager_webhook(payload: dict, background_tasks: BackgroundTasks):
     """
@@ -259,6 +287,9 @@ async def alertmanager_webhook(payload: dict, background_tasks: BackgroundTasks)
             "source": "alertmanager",
             "alert_name": alert_name,
         }
+
+        # Notify Slack — alert-triggered investigation started
+        send_investigation_started(thread_id, question)
 
         background_tasks.add_task(
             run_investigation,

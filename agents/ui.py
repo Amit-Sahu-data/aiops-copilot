@@ -7,7 +7,7 @@ import streamlit as st
 import requests
 import time
 
-API_BASE = "http://localhost:8080"
+API_BASE = "http://localhost:8088"
 
 st.set_page_config(
     page_title="AIOps Copilot",
