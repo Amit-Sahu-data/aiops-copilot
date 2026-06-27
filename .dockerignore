@@ -1,0 +1,8 @@
+agents/venv/
+agents/__pycache__/
+agents/*.pyc
+agents/.env
+agents/agent_checkpoints.db
+agents/eval_results.json
+agents/doc_index/
+agents/*.db
